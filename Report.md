@@ -81,4 +81,7 @@ The process repeats every iteration of KMeans and is consctructed of two phases:
    -> Therefore each clusters centroid is recalculated independently and also in parallel.
 After each iteration Spark returns only a small list of new centroids to the driver by calling: newCentroidsById.collect()
 The driver then updates the centroid list and starts the next iteration.
+
 ## Declarations (if any)
+We used LLM to help with some Syntax problems we encountered and for the setting up process - which was very usefull to decipher the log files.
+Further it helped us fixing an import issue which we faced in Task 3.
