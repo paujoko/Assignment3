@@ -12,18 +12,30 @@ _Note:_ Include the Spark execution history for each task. Name the zip file as 
 ### Task 1: Word counting
 
 1. If you were given an additional requirement of excluding certain words (for example, conjunctions), at which step you would do this and why? (0.1 pt)
-
+    After Step A (creating a flatMap) and before Step B (creating the key-value-pair). 
+    In this way, we obtain the words and are able to extract the certain words to exclude, and avoid making extra operations by creating the key value pairs and shuffle.
 
 
 2. In Lecture 1, the potential of optimizing the mapping step through combined mapping and reduce was discussed. How would you use this in this task? (in your answer you can either provide a description or a pseudo code). Optional: Implement this optimization and observe the effect on performance (i.e., time taken for completion). (0.1 pt)
-
+   I would use a reduceByKey phase: within each partitioning, repeated key value pairs are getting combined local on every node before the shuffle. For example, if one partitioning has two times A:1 , it will get reduced as A:2.
+   This reduceByKey phase will reduce bandwidth and shuffle bytes in the shuffle phase, because less pairs are getting sent
 
 
 3. In local execution mode (i.e. standalone mode), change the number of cores that is allocated by the master (.setMaster("local[<n>]") and measure the time it takes for the applicationto complete in each case. For each value of core allocation, run the experiment 5 times (to rule out large variances). Plot a graph showing the time taken for completion (with standard deviation) vs the number of cores allocated. Interpret and explain the results briefly in few sentences. (0.4 pt)
+   Cores: 1 | Avg Time: 613.80 ms | Std Dev: 790.43 ms
+   Cores: 2 | Avg Time: 171.00 ms | Std Dev: 27.42 ms
+   Cores: 4 | Avg Time: 141.60 ms | Std Dev: 23.35 ms
+   Cores: 8 | Avg Time: 149.40 ms | Std Dev: 7.17 ms
+   Cores: * | Avg Time: 143.20 ms | Std Dev: 6.40 ms
 
+    When increasing the number of cores, the execution time decreases significantly up to around 4–8 cores, 
+    after which performance gains become minimal because all CPU resources are fully utilized.
 
 4. Examine the execution history. Explain your observations regarding the planning of jobs, stages, and tasks. (0.4 pt)
-
+   One Spark job was created for the entire WordCount process. It was divided into two stages:
+   Stage 0 used flatMap and mapToPair to split the input text and create key-value pairs.
+   Stage 1 ran reduceByKey to aggregate word counts, which triggered a shuffle.
+   The job was executed on one master and three workers (four cores total). Tasks were evenly distributed across the cores, showing efficient parallel execution and good resource utilization.
 
 ### Task 2
 
