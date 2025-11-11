@@ -66,5 +66,19 @@ Used feature: we have partitioned the data by months and hours (partitionBy("mon
 
 1. Explain how the K-Means program you have implemented, specifically the centroid estimation and recalculation, is parallelized by Spark (0.5pt)
 
+***Answ.:***
+Our implementations is parallel because we express every step (E and M) as a RDD transformation. The algorithm isnt run as a single loop on one machine by spark, but rather Spark splits the dataset into partitions and executes the lgoic on multiple executors at the same time.
 
+The process repeats every iteration of KMeans and is consctructed of two phases:
+
+1. **E-Step (Assigning data points to nearest centroid)**
+   At the very beginning of each iteration the current centroid is broadcasted to all workers. Broadcasting essentially means that Spark only has to deliver the list of centroids once to each of the workers, rather sending them with every task redundantly. Each worker receives a subset of the dataset
+   and by using the function ***findClosestCentroid(p, centroidsBroadast.value())*** estimates the closes centroid for every datapoint in the received subset.
+2. **M-Step (Recalculate Centroids)**
+   Spark now uses ***groupByKey()*** after all points have been assigned to a centroid ID to recalculate the centroids.
+   When calling this function all points of a cluster end up on the same executor (this process is called shuffle). 
+   All executors compute the new centroid for the corresponding cluster by computing the mean of the point which it received by using **calculateNewCentroid**. 
+   -> Therefore each clusters centroid is recalculated independently and also in parallel.
+After each iteration Spark returns only a small list of new centroids to the driver by calling: newCentroidsById.collect()
+The driver then updates the centroid list and starts the next iteration.
 ## Declarations (if any)

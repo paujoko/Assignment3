@@ -8,7 +8,6 @@ import org.apache.spark.broadcast.Broadcast;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
-import org.apache.spark.sql.execution.streaming.state.StreamingAggregationStateManagerImplV1;
 import scala.Tuple2;
 
 import java.io.Serializable;
@@ -16,9 +15,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
-import java.util.stream.Collectors;
-
-import static org.apache.spark.sql.functions.col;
 
 public class TaskKMeans implements Serializable {
 
@@ -101,15 +97,18 @@ public class TaskKMeans implements Serializable {
         double[] sum = null;
         int count = 0;
         for (DataPoint p : pointsInCluster) {
-            double[] f = p.getFeatures();
-            if (sum == null) sum = new double[f.length];
-            for (int i = 0; i < f.length; i++) sum[i] += f[i];
+            double[] features = p.getFeatures();
+            if (sum == null) sum = new double[features.length];
+            for (int i = 0; i < features.length; i++) sum[i] += features[i];
             count++;
         }
-        if (count == 0) return new DataPoint(sum == null ? new double[]{0.0} : sum); // defensive
-        for (int i = 0; i < sum.length; i++) sum[i] /= count;
+        if (count == 0) {
+            return new DataPoint(sum == null ? new double[]{0.0} : sum);
+        }
+        for (int i = 0; i < sum.length; i++) {
+            sum[i] /= count;
+        }
         return new DataPoint(sum);
-        // return new DataPoint(null /* newCentroidFeatures*/);
     }
 
 
@@ -133,10 +132,10 @@ public class TaskKMeans implements Serializable {
         // Load Data from CSV into a Dataset<Row>
         // Use SparkSession.read() to load CSV into a Dataset<Row>
         Dataset<Row> rawData = DatasetHelper.getDataset(sparkSession, datasetFileName, local);
-        rawData = rawData.drop("timestamp").drop("unix_timestamp"); // records mit volumer unter 50 dl herausfiltern
+        rawData = rawData.drop("timestamp").drop("unix_timestamp");
 
         //Filter out potentially noisy data
-        rawData = rawData.filter("volume >= 50");
+        rawData = rawData.filter("volume >= 50");  // records mit volumen unter 50 dl herausfiltern
 
         System.out.println("Schema of loaded CSV:");
         rawData.printSchema();
@@ -189,11 +188,11 @@ public class TaskKMeans implements Serializable {
             System.out.println("\nIteration " + (iter + 1));
 
             // Broadcast current centroids to all worker nodes
-            Broadcast<List<DataPoint>> centroidsBc = jsc.broadcast(currentCentroids);
+            Broadcast<List<DataPoint>> centroidsBroadast = jsc.broadcast(currentCentroids);
 
             // E-step: Assign each training data point to its closest centroid
             JavaPairRDD<Integer, DataPoint> assignments = trainingDataRDD.mapToPair(p -> {
-                int cid = findClosestCentroid(p, centroidsBc.value());
+                int cid = findClosestCentroid(p, centroidsBroadast.value());
                 return new Tuple2<>(cid, p);
             });
 
@@ -203,7 +202,7 @@ public class TaskKMeans implements Serializable {
 
             // Collect new centroids to the driver and sort them by ID
             List<Tuple2<Integer, DataPoint>> collected =
-                    new ArrayList<>(newCentroidsById.collect());   // jetzt mutable
+                    new ArrayList<>(newCentroidsById.collect());
             collected.sort(java.util.Comparator.comparingInt(Tuple2::_1));
 
 
@@ -223,7 +222,7 @@ public class TaskKMeans implements Serializable {
 
             // Update centroids for next iteration
             currentCentroids = nextCentroids;
-            centroidsBc.destroy();
+            centroidsBroadast.destroy();
 
             System.out.println("Current Centroids:");
             currentCentroids.forEach(c -> System.out.println(Arrays.toString(c.getFeatures())));
