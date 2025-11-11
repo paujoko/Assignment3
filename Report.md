@@ -4,6 +4,7 @@
 
 Paul Kottmann, Lukas Kapferer, Amelia Gasser
 
+https://github.com/paujoko/Assignment3
 
 ## Responses to questions posed in the assignment
 
