@@ -18,6 +18,8 @@ import java.util.List;
 import java.util.Random;
 import java.util.stream.Collectors;
 
+import static org.apache.spark.sql.functions.col;
+
 public class TaskKMeans implements Serializable {
 
     public static class DataPoint implements Serializable {
@@ -58,8 +60,13 @@ public class TaskKMeans implements Serializable {
      * @return The Euclidean distance.
      */
     public static double euclideanDistance(double[] v1, double[] v2) {
-
-        return 0.0;
+        // TODO:
+        double sum = 0.0;
+        for (int i = 0; i < v1.length; i++) {
+            double difference = v1[i] - v2[i];
+            sum += difference * difference;
+        }
+        return Math.sqrt(sum);
     }
 
     /**
@@ -69,9 +76,18 @@ public class TaskKMeans implements Serializable {
      * @return The index of the closest centroid.
      */
     public static int findClosestCentroid(DataPoint point, List<DataPoint> centroids) {
+        // TODO:
         double minDistance = Double.MAX_VALUE;
         int closestCentroidId = -1;
 
+        double[] f = point.getFeatures();
+        for (int i = 0; i < centroids.size(); i++) {
+            double dist = euclideanDistance(f, centroids.get(i).getFeatures());
+            if (dist < minDistance) {
+                minDistance = dist;
+                closestCentroidId = i;
+            }
+        }
         return closestCentroidId;
     }
 
@@ -81,8 +97,19 @@ public class TaskKMeans implements Serializable {
      * @return A new DataPoint representing the mean of the cluster.
      */
     public static DataPoint calculateNewCentroid(Iterable<DataPoint> pointsInCluster) {
-
-        return new DataPoint(null /* newCentroidFeatures*/);
+        // TODO:
+        double[] sum = null;
+        int count = 0;
+        for (DataPoint p : pointsInCluster) {
+            double[] f = p.getFeatures();
+            if (sum == null) sum = new double[f.length];
+            for (int i = 0; i < f.length; i++) sum[i] += f[i];
+            count++;
+        }
+        if (count == 0) return new DataPoint(sum == null ? new double[]{0.0} : sum); // defensive
+        for (int i = 0; i < sum.length; i++) sum[i] /= count;
+        return new DataPoint(sum);
+        // return new DataPoint(null /* newCentroidFeatures*/);
     }
 
 
@@ -106,10 +133,10 @@ public class TaskKMeans implements Serializable {
         // Load Data from CSV into a Dataset<Row>
         // Use SparkSession.read() to load CSV into a Dataset<Row>
         Dataset<Row> rawData = DatasetHelper.getDataset(sparkSession, datasetFileName, local);
-        rawData = rawData.drop("timestamp").drop("unix_timestamp");
+        rawData = rawData.drop("timestamp").drop("unix_timestamp"); // records mit volumer unter 50 dl herausfiltern
 
         //Filter out potentially noisy data
-        //rawData = rawData.filter();
+        rawData = rawData.filter("volume >= 50");
 
         System.out.println("Schema of loaded CSV:");
         rawData.printSchema();
@@ -162,25 +189,44 @@ public class TaskKMeans implements Serializable {
             System.out.println("\nIteration " + (iter + 1));
 
             // Broadcast current centroids to all worker nodes
-
+            Broadcast<List<DataPoint>> centroidsBc = jsc.broadcast(currentCentroids);
 
             // E-step: Assign each training data point to its closest centroid
-
+            JavaPairRDD<Integer, DataPoint> assignments = trainingDataRDD.mapToPair(p -> {
+                int cid = findClosestCentroid(p, centroidsBc.value());
+                return new Tuple2<>(cid, p);
+            });
 
             // M-step: Calculate new centroids based on the mean of assigned points
-
+            JavaPairRDD<Integer, DataPoint> newCentroidsById =
+                    assignments.groupByKey().mapValues(TaskKMeans::calculateNewCentroid);
 
             // Collect new centroids to the driver and sort them by ID
+            List<Tuple2<Integer, DataPoint>> collected =
+                    new ArrayList<>(newCentroidsById.collect());   // jetzt mutable
+            collected.sort(java.util.Comparator.comparingInt(Tuple2::_1));
 
 
             // Check for convergence
             boolean converged = true;
+            List<DataPoint> nextCentroids = new ArrayList<>(currentCentroids);
+            for (Tuple2<Integer, DataPoint> t : collected) {
+                int id = t._1;
+                DataPoint oldC = currentCentroids.get(id);
+                DataPoint newC = t._2;
 
+                double delta = euclideanDistance(oldC.getFeatures(), newC.getFeatures());
+                if (delta > convergenceThreshold) converged = false;
+
+                nextCentroids.set(id, newC);
+            }
 
             // Update centroids for next iteration
+            currentCentroids = nextCentroids;
+            centroidsBc.destroy();
 
             System.out.println("Current Centroids:");
-            //currentCentroids.forEach(c -> System.out.println(Arrays.toString(c.getFeatures())));
+            currentCentroids.forEach(c -> System.out.println(Arrays.toString(c.getFeatures())));
 
             if (converged) {
                 System.out.println("\nK-Means converged after " + (iter + 1) + " iterations.");
